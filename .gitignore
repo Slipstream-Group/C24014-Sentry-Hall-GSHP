@@ -1,0 +1,5 @@
+*.plt
+*.out
+*.log
+*.lst
+*.pti

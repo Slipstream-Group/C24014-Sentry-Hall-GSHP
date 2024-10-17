@@ -1,0 +1,23 @@
+Vary {
+
+    Parameter {
+        Name    = n;
+        Min     = 3.00;
+        Ini     = 15.00;
+        Max     = 80;
+        Step    = 1.0;
+        Type    = CONTINUOUS;
+    }
+
+}
+
+OptimizationSettings {
+    MaxIte = 100;
+    MaxEqualResults = 5;
+    WriteStepNumber = false;
+}
+
+Algorithm{
+  Main = GoldenSection;
+  AbsDiffFunction = 0.1;
+}

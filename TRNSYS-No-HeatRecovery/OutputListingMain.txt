@@ -1,0 +1,29 @@
+GenOpt(R) Version 3.1.1, March 29, 2016
+
+Lawrence Berkeley National Laboratory
+http://simulationresearch.lbl.gov
+Michael Wetter, MWetter@lbl.gov
+
+GenOpt Copyright (c) 1998-2016, The Regents of the
+University of California, through Lawrence Berkeley
+National Laboratory (subject to receipt of any 
+required approvals from the U.S. Dept. of Energy).
+All rights reserved.
+_______________________________________________________________
+
+Results of GoldenSection algorithm
+Start time: Sun Sep 29 21:11:54 CDT 2024
+
+Main Iterations
+
+
+Simulation Number	Main Iteration	Step Number	dT	n
+
+
+Result overview
+***************
+Lower border of uncertainty interval        : 21.17723426748381
+Upper border of uncertainty interval        : 50.588617133741906
+Mid point of uncertainty interval           : 35.88292570061286
+Length of uncertainty interval              : 29.411382866258094
+Normalized reduction of uncertainty interval: 0.3819660112501051
