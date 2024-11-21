@@ -18,6 +18,13 @@ datadf.drop(datadf.columns[len(datadf.columns)-1], axis=1, inplace=True)
 
 #nan_df = datadf.isna()
 #print(nan_df)
+#add a column for date - having it start at 1/1/2026 00:00
+#datadf['Period'] = datadf['Period'].astype(str).astype(int)
+#datadf['date'] = pd.to_datetime(datadf['Period'],unit='h', origin='2025-12-31 23:00')
+
+
+print(datadf.head())
+hold=0
 
 # Import Cambium data and define combustion emissions factor
 df_cambium = pd.read_csv(os.path.join(cwd,"emissionsfactors_longformat.csv"),
@@ -29,7 +36,7 @@ datadf['95by2050_co2e'] = df_cambium['95by2050_co2e'] # kg per MWh
 natgas_co2e = 53.06 # kg per million Btu
 
 # Define financial information
-dollarPerkWh = 0.08
+dollarPerkWh = 0.074
 dollarPerMBtu = 9.78
 GHX_DollarPerft = 33.96
 HeatPmp_DollarPerTon = 1849
@@ -54,27 +61,16 @@ for column in datadf.columns:
 p_baseline_chlr = pd.read_csv(os.path.join(cwd,'baseline_chlr_power.csv'), header=0)
 datadf['p_chlr_baseline'] = p_baseline_chlr['p_chlr_baseline']
 
-# Make some calculations for QC checks
-datadf['COP_clg'] = datadf['q_cool']/3.412/datadf['p_hp_clg']
-datadf['COP_htg'] = datadf['q_heat']/3.412/datadf['p_hp_htg']
-datadf['COP_hrc'] = ((datadf['q_cool_htrec'] + datadf['q_heat_htrec'])/3.412/
-                     datadf['p_hp_dhr'])
 
-#add a column for date - having it start at 1/1/2026 00:00
-datadf['date'] = pd.to_datetime(datadf['Period'],unit='h', origin='2025-12-31 23:00')
-
-
-print(datadf.head())
-hold=0
 
 # Calculate hourly co2 emissions
 
-datadf['GSHP_co2e_MidCase'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'])*
+datadf['GSHP_co2e_MidCase'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'] + datadf['p_BHE_pump'])*
                                datadf['MidCase_co2e']*0.001 + datadf['q_boiler']
                                *1.25*1.25*natgas_co2e*0.001)
 # Assuming 80% boiler efficiency and 20% distribution losses
 
-datadf['GSHP_co2e_95by2050'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'])*
+datadf['GSHP_co2e_95by2050'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'] + datadf['p_BHE_pump'])*
                                datadf['95by2050_co2e']*0.001 + datadf['q_boiler']
                                *1.25*natgas_co2e*0.001)
 datadf['baseline_co2e_MidCase'] = (0.001 * datadf['p_chlr_baseline'] * datadf['MidCase_co2e'] + 
@@ -91,43 +87,47 @@ datadf['OPEX_baseline'] = (datadf['p_chlr_baseline']*dollarPerkWh +
 # already factors in the boilers themselves
 
 datadf['OPEX_GSHP'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'] + 
-                        datadf['p_pump_BHE'])*dollarPerkWh)
+                        datadf['p_BHE_pump'])*dollarPerkWh)
 
-annual = datadf.groupby('year')
+
 
 '''
 Some QC checks - plot COPs of heating and cooling heat pumps and heat recovery
 chiller, some descriptive statistics
 '''
 
-clg_QC = datadf.loc[datadf['p_hp_clg']!=0,('year', 't_GHX_out', 't_chw_s', 
-                                           'q_cool', 'p_hp_clg', 'COP_clg')]
+clg_QC = datadf.loc[datadf['q_cool_hp']!=0,('year', 't_GHX_out', 't_chw_s', 
+                                           'q_cool_hp', 'p_hp_c')]
+clg_QC['COP_clg'] = clg_QC['q_cool_hp']/3.412/clg_QC['p_hp_c']
+htg_QC = datadf.loc[datadf['q_heat_hp']!=0,('year', 't_GHX_out', 't_hw_s',
+                                           'q_heat_hp', 'p_hp_h')]
+htg_QC['COP_htg'] = htg_QC['q_heat_hp']/3.412/htg_QC['p_hp_h']
+htrec_QC = datadf.loc[datadf['p_hp_dhr']!=0, ('year','p_hp_dhr','q_src_hpdr',
+                                              'q_load_hpdr')]
+htrec_QC['COP_htrec'] = (htrec_QC['q_src_hpdr']+htrec_QC['q_load_hpdr'])/3.412/htrec_QC['p_hp_dhr']
 
-htg_QC = datadf.loc[datadf['p_hp_htg']!=0,('year', 't_GHX_out', 't_hw_s',
-                                           'q_heat', 'p_hp_htg', 'COP_htg')]
-
-htrec_QC = datadf.loc[datadf['p_hp_dhr']!=0, ('year','p_hp_dhr','q_cool_htrec',
-                                              'q_heat_htrec', 'COP_hrc')]
 
 plt.scatter(clg_QC['t_GHX_out'],clg_QC['COP_clg'], marker = '+', s=1)
-plt.scatter(clg_QC['q_cool'],clg_QC['COP_clg'], marker = '+', s=1)
+plt.scatter(clg_QC['q_cool_hp'],clg_QC['COP_clg'], marker = '+', s=1)
 sns.kdeplot(clg_QC['COP_clg'], cumulative=True)
 clg_QC['COP_clg'].describe(percentiles=[.05,.1,.9,.95])
 
 plt.scatter(htg_QC['t_GHX_out'],htg_QC['COP_htg'], color='r', marker = '+', s=1)
-plt.scatter(htg_QC['q_heat'],htg_QC['COP_htg'], color='r', marker = '+', s=1)
+plt.scatter(htg_QC['q_heat_hp'],htg_QC['COP_htg'], color='r', marker = '+', s=1)
 sns.kdeplot(htg_QC['COP_htg'], cumulative=True)
 htg_QC['COP_htg'].describe(percentiles=[.05,.1,.9,.95])
 
 
-htrec_QC['cop_cool_hrc'] = htrec_QC['q_cool_htrec']/3.412/htrec_QC['p_hp_dhr']
-htrec_QC['cop_heat_hrc'] = htrec_QC['q_heat_htrec']/3.412/htrec_QC['p_hp_dhr']
-htrec_QC['total_clg_htg'] = htrec_QC['q_cool_htrec'] - htrec_QC['q_heat_htrec']
+htrec_QC['cop_cool_hrc'] = -htrec_QC['q_src_hpdr']/3.412/htrec_QC['p_hp_dhr']
+htrec_QC['cop_heat_hrc'] = htrec_QC['q_load_hpdr']/3.412/htrec_QC['p_hp_dhr']
+htrec_QC['total_clg_htg'] = -htrec_QC['q_src_hpdr'] + htrec_QC['q_load_hpdr']
 htrec_QC['COP_hrc'] = htrec_QC['total_clg_htg']/3.412/htrec_QC['p_hp_dhr']
-plt.scatter(htrec_QC['q_cool_htrec'], htrec_QC['cop_cool_hrc'], marker='+')
-plt.scatter(htrec_QC['q_heat_htrec'], htrec_QC['cop_cool_hrc'], marker='+')
+plt.scatter(-htrec_QC['q_src_hpdr'], htrec_QC['cop_cool_hrc'], marker='+')
+plt.scatter(htrec_QC['q_load_hpdr'], htrec_QC['cop_cool_hrc'], marker='+')
 plt.scatter(htrec_QC['total_clg_htg'], htrec_QC['COP_hrc'], marker='+')
 
+
+annual = datadf.groupby('year')
 
 '''
 Collate and plot results: Greenhouse gas and financial
@@ -174,7 +174,7 @@ for c in plotresults_financial.columns:
 plotresults_financial.loc[:, 'net_savings'] = plotresults_financial.loc[:, 'OPEX_baseline']-plotresults_financial.loc[:, 'OPEX_GSHP']
 
 # Add initial costs in 2025
-plotresults_financial.loc[2025] = [749171, 853227, -104056]
+plotresults_financial.loc[2025] = [749171, 1009440, -260269]
 plotresults_financial.sort_index(inplace=True)
 plotresults_financial['cumulative'] = np.zeros(26)
 plotresults_financial.loc[2025,'cumulative'] = plotresults_financial.loc[2025,'net_savings']
@@ -185,13 +185,12 @@ for i in list(range(2026,2051)):
     plotresults_financial.loc[i, 'net_savings']
 
     
-    
+'''    
 # Apply discount and escalation factors
 
 def present_value(money, i, j, e, n):
     return money*((1+e)**n)*((1+j)**n)*((1+i)**(-n))
 
-'''
 for n0, n1 in list(zip(list(range(2026,2051)), list(range(1,26)))):
     for c in plotresults_financial.columns:
         (plotresults_financial.loc[n0, c] = 
@@ -205,7 +204,11 @@ ax1.plot(plotresults_financial.index,
 ax1.yaxis.set_major_formatter('${x:,.0f}')
 ax1.yaxis.set_tick_params(which='major')
 ax1.grid(visible=True, which='major')
+ax1.set_ylabel('Net Savings')
 
-
+baseline_cost = plotresults_financial.loc[2026,'OPEX_baseline']
+GSHP_cost = plotresults_financial.loc[2026,'OPEX_GSHP']
+annual_savings = baseline_cost - GSHP_cost
+print("Annual Savings = $", annual_savings)
                   
          
