@@ -2,13 +2,14 @@ import pandas as pd
 import os 
 import numpy as np, scipy as sp
 from matplotlib import pyplot as plt 
+from matplotlib import ticker
 import seaborn as sns
 
 """ Take the output file from the TRNSYS model and turn it into a Pandas dataframe"""
 #--------------------------------------------------------
 #Import the CSV file that has been written from TRNSYS 
 cwd=os.getcwd()
-file=os.path.join(cwd,"results_hrly.out")
+file=os.path.join(cwd,"results_hrly_50bh.out")
 datadf=pd.read_csv(file, skiprows=[0], sep='\t', header=0, nrows=int(8760*25)) 
 #datadf=pd.read_csv(file, skiprows=[0], sep='\t', header=0, skipfooter=23, engine='python') 
 #strip spaces -----------------------
@@ -61,8 +62,6 @@ for column in datadf.columns:
 p_baseline_chlr = pd.read_csv(os.path.join(cwd,'baseline_chlr_power.csv'), header=0)
 datadf['p_chlr_baseline'] = p_baseline_chlr['p_chlr_baseline']
 
-
-
 # Calculate hourly co2 emissions
 
 datadf['GSHP_co2e_MidCase'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'] + datadf['p_BHE_pump'])*
@@ -72,10 +71,13 @@ datadf['GSHP_co2e_MidCase'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'] + datadf[
 
 datadf['GSHP_co2e_95by2050'] = ((datadf['p_hp_hc'] + datadf['p_hp_dhr'] + datadf['p_BHE_pump'])*
                                datadf['95by2050_co2e']*0.001 + datadf['q_boiler']
-                               *1.25*natgas_co2e*0.001)
-datadf['baseline_co2e_MidCase'] = (0.001 * datadf['p_chlr_baseline'] * datadf['MidCase_co2e'] + 
-                                   0.001 * datadf['q_heat'] * 1.25 * natgas_co2e)
+                               *1.25*1.25*natgas_co2e*0.001)
 
+datadf['baseline_co2e_MidCase'] = (0.001 * datadf['p_chlr_baseline'] * datadf['MidCase_co2e'] + 
+                                   0.001 * datadf['q_heat'] * 1.25*1.25 * natgas_co2e)
+
+datadf['baseline_co2e_95by2050'] = (0.001 * datadf['p_chlr_baseline'] * datadf['95by2050_co2e'] + 
+                                   0.001 * datadf['q_heat'] * 1.25*1.25 * natgas_co2e)
 
 
 
@@ -129,18 +131,81 @@ plt.scatter(htrec_QC['total_clg_htg'], htrec_QC['COP_hrc'], marker='+')
 
 annual = datadf.groupby('year')
 
+# Get a typical year and final year of study (2050)
+typyr = datadf.loc[datadf['year'] == 2035]
+typyr['Period'] = np.arange(1,8761)
+
+typ_ghx_rej = np.sum(typyr.loc[typyr['q_GHX_net'] > 0, 'q_GHX_net'])/1000 # Total heat rejected to GHX in typical year, MBtu
+typ_ghx_ext = np.sum(typyr.loc[typyr['q_GHX_net'] < 0, 'q_GHX_net'])/1000 # Total heat extracted from GHX in typical year, MBtu
+typ_hrc_clg = np.sum(typyr['q_load_hpdr'])/1000 # Total cooling supplied by heat recovery chiller, MBtu
+typ_hrc_htg = np.sum(typyr['q_src_hpdr'])/1000 # Total heating supplied by heat recovery chiller, MBtu
+
+
+lastyr = datadf.loc[datadf['year'] == 2050]
+lastyr['Period'] = np.arange(1,8761)
+
+# Hourly time series plot of 2050 leaving GHX temperature
+monthticks = np.array([0, 744, 1416, 2160, 2880, 3624, 4344, 5088, 5832, 6552, 7296, 8016, 8759])
+labelticks = np.array([372, 1080, 1788, 2520, 3252, 3984, 4716, 5460, 6192, 6924, 7656, 8388])
+monthlabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec']
+
+fig, ax1 = plt.subplots()
+ax1.set_xlim(left=0, right=8760)
+ax1.set_xticks(monthticks)
+ax1.tick_params(
+    axis='x',
+    which='major',
+    labelbottom=False)
+ax1.set_xticks(labelticks, minor=True)
+ax1.set_xticklabels(monthlabels, minor=True)
+ax1.tick_params(
+    axis='x',
+    which='minor',
+    length=0)
+ax1.set_ylabel('Leaving GHX Temperature [F]')
+ax1.set_ylim(bottom=50, top=90)
+ax1.set_yticks(np.arange(50,95,5))
+ax1.plot(typyr['Period'], typyr['t_GHX_out'], color='red', linewidth=0.5)
+
+
+
+'''
+Plot results: energy use vs baseline
+'''
+GSHP_elec = {'GSHP Heating': [np.sum(typyr['p_hp_h']), 'red'],
+             'GSHP Cooling': [np.sum(typyr['p_hp_c']), 'blue'],
+             'Heat Recovery Chiller': [np.sum(typyr['p_hp_dhr']), 'green'],
+             'Pumps': [np.sum([typyr['p_LoadPumps'],typyr['p_BHE_pump']]), 'orange']}
+
+baseline_elec = [np.sum(typyr['p_chlr_baseline']),
+              np.sum([typyr['p_LoadPumps'],typyr['p_BHE_pump']])]
+
+baseline_steam = np.sum(typyr['q_heat'])*1.25*1.25/1000 # Million Btu
+
+enduselabels_GSHP = ['Heating HP','Cooling HP', 'Heat Recovery Chiller', 'Pumps']
+
+fig, ax2 = plt.subplots()
+bottom = 0
+for boolean, enduse in GSHP_elec.items():
+    ax2.bar(1, enduse[0], width = 1, label=boolean, color = enduse[1], bottom=bottom)
+    bottom+= enduse[0]
+
+ax2.legend(loc='right')
+ax2.set_ylabel('kWh')
+ax2.set_xlim(left=0, right=3)
+ax2.set_xticks([])
+ax2.yaxis.set_major_formatter('{x:,.0f}')
+
 '''
 Collate and plot results: Greenhouse gas and financial
 '''
 
 # GHG results
 plotresults_ghg = pd.DataFrame(index=annual.groups.keys(), columns = 
-                              ['baseline_co2e_MidCase',
-                               'GSHP_co2e_MidCase',
+                              ['baseline_co2e_95by2050',
                                'GSHP_co2e_95by2050'])
 
-emissions_lifetime = {'Baseline': np.sum(annual['baseline_co2e_MidCase'].sum())/1000,
-                      'GSHP_MidCase': np.sum(annual['GSHP_co2e_MidCase'].sum())/1000,
+emissions_lifetime = {'Baseline': np.sum(annual['baseline_co2e_95by2050'].sum())/1000,
                       'GSHP_95by2050': np.sum(annual['GSHP_co2e_95by2050'].sum())/1000}
 
 for c in plotresults_ghg.columns:
@@ -148,18 +213,17 @@ for c in plotresults_ghg.columns:
         
 #Filter down to 2026, 2035, and 2050 for ghg plot
 plotresults_ghg = plotresults_ghg.loc[[2026, 2035, 2050]] 
-baseline = plotresults_ghg['baseline_co2e_MidCase']
-gshp_midcase = plotresults_ghg['GSHP_co2e_MidCase']
+baseline = plotresults_ghg['baseline_co2e_95by2050']
 gshp_95by2050 = plotresults_ghg['GSHP_co2e_95by2050']
 
 x = np.arange(1,4)
 w = 0.25
 
 fig, ax = plt.subplots(layout='constrained')
-ax.bar(x - w, baseline,
-        width = w, label = 'Baseline', color='r')
-ax.bar(x, gshp_midcase, width=w, label='Geothermal Mid Case')
-ax.bar(x + w, gshp_95by2050, width=w, label='Geothermal 95% Decarb', color='g')
+ax.bar(x - 0.8*w, baseline,
+        width = 1.5*w, label = 'Baseline', color='r')
+#ax.bar(x, gshp_midcase, width=w, label='Geothermal Mid Case')
+ax.bar(x + 0.8*w, gshp_95by2050, width=1.5*w, label='Geothermal', color='g')
 ax.set_ylabel('Annual emissions [metric tons CO2e]')
 ax.set_xticks(x, ['2025', '2035', '2050'])
 ax.legend(loc='best', ncols=1)
@@ -171,7 +235,9 @@ plotresults_financial = pd.DataFrame(index = annual.groups.keys(), columns =
 for c in plotresults_financial.columns:
     plotresults_financial[c] = annual[c].sum()
     
-plotresults_financial.loc[:, 'net_savings'] = plotresults_financial.loc[:, 'OPEX_baseline']-plotresults_financial.loc[:, 'OPEX_GSHP']
+plotresults_financial.loc[:, 'net_savings'] = \
+    plotresults_financial.loc[:, 'OPEX_baseline'] - \
+        plotresults_financial.loc[:, 'OPEX_GSHP']
 
 # Add initial costs in 2025
 plotresults_financial.loc[2025] = [749171, 1009440, -260269]
